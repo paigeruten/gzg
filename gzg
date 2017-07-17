@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+
+cmd_version() {
+  echo "hi, i'm gzg v0.1"
+}
+
+cmd_usage() {
+  cmd_version
+  echo
+  cat <<-_EOF
+	Usage:
+	     $PROGRAM [sync]
+	     $PROGRAM init <gpg-id> <remote>
+	     $PROGRAM clone <remote> <folder>
+	_EOF
+}
+
+cmd_init() {
+  if [[ ! -d .git ]]; then
+    git init
+    git add -A
+    git commit -m "gzg init"
+  fi
+
+  git config gzg.gpgid "$1"
+  git config gzg.remote "$2"
+
+  git init --bare .git/gzg.git
+  git remote add gzg .git/gzg.git
+
+  git push gzg master
+  git -C .git/gzg.git config gzg.gpgid "$1"
+  cd .git
+  tar czf gzg.git.tar.gz gzg.git
+  gpg --encrypt -r "$1" gzg.git.tar.gz
+  rm -rf gzg.git gzg.git.tar.gz
+
+  scp gzg.git.tar.gz.gpg "$2"
+  rm gzg.git.tar.gz.gpg
+}
+
+cmd_sync() {
+  gpgid="$(git config --get gzg.gpgid)"
+  remote="$(git config --get gzg.remote)"
+
+  git add -A
+  git commit -m "gzg sync"
+
+  scp "$remote" .git/gzg.git.tar.gz.gpg
+  gpg --decrypt .git/gzg.git.tar.gz.gpg > .git/gzg.git.tar.gz
+  cd .git
+  tar xf gzg.git.tar.gz
+  rm -rf gzg.git.tar.gz gzg.git.tar.gz.gpg
+  cd ..
+  git pull gzg master
+  git push gzg master
+  cd .git
+  tar czf gzg.git.tar.gz gzg.git
+  gpg --encrypt -r "$gpgid" gzg.git.tar.gz
+  rm -rf gzg.git gzg.git.tar.gz
+  scp gzg.git.tar.gz.gpg "$remote"
+  rm gzg.git.tar.gz.gpg
+}
+
+cmd_clone() {
+  mkdir "$2"
+  cd "$2"
+  git init
+  scp "$1" .git/gzg.git.tar.gz.gpg
+  gpg --decrypt .git/gzg.git.tar.gz.gpg > .git/gzg.git.tar.gz
+  cd .git
+  tar xf gzg.git.tar.gz
+  rm -rf gzg.git.tar.gz gzg.git.tar.gz.gpg
+  cd ..
+  git remote add gzg .git/gzg.git
+  git pull gzg master
+
+  gpgid="$(git -C .git/gzg.git config --get gzg.gpgid)"
+
+  git config gzg.gpgid "$(git -C .git/gzg.git config --get gzg.gpgid)"
+  git config gzg.remote "$1"
+
+  rm -rf .git/gzg.git .git/gzg.git
+}
+
+PROGRAM="${0##*/}"
+COMMAND="$1"
+
+case "$1" in
+  init) shift;               cmd_init "$@" ;;
+  help|--help) shift;        cmd_usage "$@" ;;
+  version|--version) shift;  cmd_version "$@" ;;
+  sync) shift;               cmd_sync "$@" ;;
+  clone) shift;              cmd_clone "$@" ;;
+  *)                         cmd_sync "$@" ;;
+esac
+exit 0
